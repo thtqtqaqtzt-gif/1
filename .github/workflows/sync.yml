@@ -26,7 +26,7 @@ jobs:
 
       - name: Run sync script
         env:
-          TARGET_X_USER: ${{ vars.TARGET_X_USER || 'iwp70' }}
+          TARGET_X_USER: ${{ vars.TARGET_X_USER || 'Has7n_Kw' }}
           X_COOKIES_RAW: ${{ secrets.X_COOKIES_RAW }}
           TIKTOK_COOKIES_JSON: ${{ secrets.TIKTOK_COOKIES_JSON }}
         run: python runner.py

@@ -1,0 +1,39 @@
+name: X iwp70 to TikTok Runner
+
+on:
+  schedule:
+    # يعمل كل 30 دقيقة (يمكن تعديله، والحد الأدنى لـ cron هو */5)
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync script
+        env:
+          TARGET_X_USER: ${{ vars.TARGET_X_USER || 'iwp70' }}
+          X_COOKIES_RAW: ${{ secrets.X_COOKIES_RAW }}
+          TIKTOK_COOKIES_JSON: ${{ secrets.TIKTOK_COOKIES_JSON }}
+        run: python runner.py
+
+      - name: Save state if updated
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state.json || true
+          git diff --staged --quiet || (git commit -m "Update last processed tweet state" && git push)

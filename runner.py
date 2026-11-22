@@ -19,6 +19,8 @@ X_BEARER_TOKEN = (
     "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
     "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 )
+# يمكنك وضع المعرف الرقمي مباشرة هنا لأي حساب إذا أردت تجاوز البحث عنه:
+# مثال: "has7n_kw": "1234567890"
 X_USER_ID_MAP: dict[str, str] = {}
 
 
@@ -95,6 +97,26 @@ def build_x_session(x_cookies: dict[str, str]) -> requests.Session:
     return session
 
 
+def _extract_id_from_html_fallback(session: requests.Session, username: str) -> str | None:
+    try:
+        page = session.get(f"https://x.com/{username}", timeout=25)
+        if page.status_code != 200:
+            return None
+        html = page.text
+        patterns = [
+            r'"userId"\s*:\s*"(\d+)"',
+            r'"rest_id"\s*:\s*"(\d+)"',
+            r'user_id=(\d+)',
+        ]
+        for pat in patterns:
+            m = re.search(pat, html)
+            if m:
+                return m.group(1)
+    except Exception:
+        return None
+    return None
+
+
 def resolve_user_id(session: requests.Session, username: str) -> str:
     clean_name = username.strip().lstrip("@")
     if not clean_name:
@@ -118,27 +140,40 @@ def resolve_user_id(session: requests.Session, username: str) -> str:
         "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
         "responsive_web_graphql_timeline_navigation_enabled": True,
     }
-    resp = session.get(
-        X_GRAPHQL_USER_BY_NAME_URL,
-        params={
-            "variables": json.dumps(variables, separators=(",", ":")),
-            "features": json.dumps(features, separators=(",", ":")),
-        },
-        timeout=25,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    rest_id = (
-        data.get("data", {})
-        .get("user", {})
-        .get("result", {})
-        .get("rest_id")
-    )
-    if not rest_id:
-        raise RuntimeError("Could not resolve target user ID.")
 
-    X_USER_ID_MAP[clean_name.lower()] = str(rest_id)
-    return str(rest_id)
+    try:
+        resp = session.get(
+            X_GRAPHQL_USER_BY_NAME_URL,
+            params={
+                "variables": json.dumps(variables, separators=(",", ":")),
+                "features": json.dumps(features, separators=(",", ":")),
+            },
+            timeout=25,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        rest_id = (
+            data.get("data", {})
+            .get("user", {})
+            .get("result", {})
+            .get("rest_id")
+        )
+        if rest_id:
+            X_USER_ID_MAP[clean_name.lower()] = str(rest_id)
+            return str(rest_id)
+    except requests.HTTPError as exc:
+        if exc.response is None or exc.response.status_code != 404:
+            raise
+
+    fallback_id = _extract_id_from_html_fallback(session, clean_name)
+    if fallback_id:
+        X_USER_ID_MAP[clean_name.lower()] = str(fallback_id)
+        return str(fallback_id)
+
+    raise RuntimeError(
+        f"Could not resolve user_id for '{clean_name}' (GraphQL 404). "
+        "Add the numeric ID to X_USER_ID_MAP in runner.py."
+    )
 
 
 def extract_media_from_tweet(tweet_result: dict[str, Any]) -> tuple[str | None, str, list[dict[str, str]]]:
@@ -238,7 +273,6 @@ def fetch_media_posts(session: requests.Session, username: str) -> list[dict[str
                 continue
 
             tweet_id, caption, media_items = extract_media_from_tweet(item)
-            # تجاهل المنشورات النصية البحتة التي لا تحتوي على صور أو فيديو
             if tweet_id and media_items:
                 posts.append({
                     "tweet_id": str(tweet_id),
@@ -279,8 +313,6 @@ def publish_to_tiktok(
     if not cookie_map.get("sessionid") and not cookie_map.get("sid_tt"):
         return False, "TikTok sessionid/sid_tt missing or expired -> queued in pending_drafts."
 
-    # الرفع المباشر عبر الويب/API يخضع لمتطلبات توقيع وتحقق Captcha في TikTok؛
-    # عند عدم توفر خطوة رفع موثقة أو حدوث تحقق، نُرجع False لتحويله بأمان إلى مسودة.
     _ = (files, caption)
     return False, "Direct upload requires session verification/signature -> queued in pending_drafts."
 

@@ -1,7 +1,7 @@
 {
   "last_tweet_id": null,
-  "last_run": "2026-11-22T22:30:50.585666+00:00",
+  "last_run": "2026-11-22T22:33:32.026438+00:00",
   "pending_drafts": [],
   "processed_ids": [],
-  "last_status": "x_fetch_error: 404 Client Error: Not Found for url: https://x.com/i/api/graphql/G3KGOASz96M-Qu0nwmGIOg/UserByScreenName?variables=%7B%22screen_name%22%3A%22Has7n_Kw%22%2C%22withSafetyModeUserFields%22%3Atrue%7D&features=%7B%22hidden_profile_subscriptions_enabled%22%3Atrue%2C%22rweb_tipjar_consumption_enabled%22%3Atrue%2C%22responsive_web_graphql_exclude_directive_enabled%22%3Atrue%2C%22verified_phone_label_enabled%22%3Afalse%2C%22subscriptions_verification_info_is_identity_verified_enabled%22%3Atrue%2C%22subscriptions_verification_info_verified_since_enabled%22%3Atrue%2C%22highlights_tweets_tab_ui_enabled%22%3Atrue%2C%22responsive_web_twitter_article_notes_tab_enabled%22%3Atrue%2C%22creator_subscriptions_tweet_preview_api_enabled%22%3Atrue%2C%22responsive_web_graphql_skip_user_profile_image_extensions_enabled%22%3Afalse%2C%22responsive_web_graphql_timeline_navigation_enabled%22%3Atrue%7D"
+  "last_status": "x_fetch_error: Could not resolve user_id for 'Has7n_Kw' (GraphQL 404). Add the numeric ID to X_USER_ID_MAP in runner.py."
 }

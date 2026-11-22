@@ -9,6 +9,9 @@ import requests
 STATE_FILE = Path("state.json")
 MEDIA_DIR = Path("media_queue")
 
+X_GRAPHQL_USER_BY_NAME_URL = (
+    "https://x.com/i/api/graphql/G3KGOASz96M-Qu0nwmGIOg/UserByScreenName"
+)
 X_GRAPHQL_TWEETS_URL = (
     "https://x.com/i/api/graphql/E3opETHurmVJflFsUBVuAG/UserTweets"
 )
@@ -16,9 +19,7 @@ X_BEARER_TOKEN = (
     "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
     "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 )
-X_USER_ID_MAP = {
-    "iwp70": "1534987654321098765",  # يُحدَّث تلقائياً إذا أمكن استخراج المعرّف أو يُضبط يدوياً
-}
+X_USER_ID_MAP: dict[str, str] = {}
 
 
 def load_state() -> dict[str, Any]:
@@ -94,6 +95,52 @@ def build_x_session(x_cookies: dict[str, str]) -> requests.Session:
     return session
 
 
+def resolve_user_id(session: requests.Session, username: str) -> str:
+    clean_name = username.strip().lstrip("@")
+    if not clean_name:
+        raise RuntimeError("Target username is empty.")
+
+    cached = X_USER_ID_MAP.get(clean_name.lower())
+    if cached:
+        return cached
+
+    variables = {"screen_name": clean_name, "withSafetyModeUserFields": True}
+    features = {
+        "hidden_profile_subscriptions_enabled": True,
+        "rweb_tipjar_consumption_enabled": True,
+        "responsive_web_graphql_exclude_directive_enabled": True,
+        "verified_phone_label_enabled": False,
+        "subscriptions_verification_info_is_identity_verified_enabled": True,
+        "subscriptions_verification_info_verified_since_enabled": True,
+        "highlights_tweets_tab_ui_enabled": True,
+        "responsive_web_twitter_article_notes_tab_enabled": True,
+        "creator_subscriptions_tweet_preview_api_enabled": True,
+        "responsive_web_graphql_skip_user_profile_image_extensions_enabled": False,
+        "responsive_web_graphql_timeline_navigation_enabled": True,
+    }
+    resp = session.get(
+        X_GRAPHQL_USER_BY_NAME_URL,
+        params={
+            "variables": json.dumps(variables, separators=(",", ":")),
+            "features": json.dumps(features, separators=(",", ":")),
+        },
+        timeout=25,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    rest_id = (
+        data.get("data", {})
+        .get("user", {})
+        .get("result", {})
+        .get("rest_id")
+    )
+    if not rest_id:
+        raise RuntimeError("Could not resolve target user ID.")
+
+    X_USER_ID_MAP[clean_name.lower()] = str(rest_id)
+    return str(rest_id)
+
+
 def extract_media_from_tweet(tweet_result: dict[str, Any]) -> tuple[str | None, str, list[dict[str, str]]]:
     legacy = tweet_result.get("legacy") or {}
     tweet_id = tweet_result.get("rest_id") or legacy.get("id_str")
@@ -127,9 +174,7 @@ def extract_media_from_tweet(tweet_result: dict[str, Any]) -> tuple[str | None, 
 
 
 def fetch_media_posts(session: requests.Session, username: str) -> list[dict[str, Any]]:
-    user_id = X_USER_ID_MAP.get(username.lower())
-    if not user_id:
-        raise RuntimeError(f"No user_id mapped for '{username}'. Add it to X_USER_ID_MAP.")
+    user_id = resolve_user_id(session, username)
 
     variables = {
         "userId": user_id,
@@ -232,21 +277,21 @@ def publish_to_tiktok(
         if isinstance(c, dict) and c.get("name")
     }
     if not cookie_map.get("sessionid") and not cookie_map.get("sid_tt"):
-        return False, "TikTok sessionid/sid_tt missing or expired -> moved to pending_drafts."
+        return False, "TikTok sessionid/sid_tt missing or expired -> queued in pending_drafts."
 
-    # مسار الرفع المباشر عبر الويب/API يخضع لمتطلبات توقيع وتحقق Captcha في TikTok؛
+    # الرفع المباشر عبر الويب/API يخضع لمتطلبات توقيع وتحقق Captcha في TikTok؛
     # عند عدم توفر خطوة رفع موثقة أو حدوث تحقق، نُرجع False لتحويله بأمان إلى مسودة.
     _ = (files, caption)
     return False, "Direct upload requires session verification/signature -> queued in pending_drafts."
 
 
 def main() -> None:
-    target_user = os.getenv("TARGET_X_USER", "iwp70").strip().lstrip("@") or "iwp70"
+    target_user = os.getenv("TARGET_X_USER", "Has7n_Kw").strip().lstrip("@") or "Has7n_Kw"
     state = load_state()
     state["last_run"] = datetime.now(timezone.utc).isoformat()
 
     ok, msg, x_cookies, tt_cookies_obj = validate_secrets()
-    print(f"[{target_user}] {msg}")
+    print(f"[sync] {msg}")
     if not ok:
         state["last_status"] = f"secrets_error: {msg}"
         save_state(state)
@@ -257,7 +302,7 @@ def main() -> None:
         media_posts = fetch_media_posts(x_session, target_user)
     except Exception as exc:
         state["last_status"] = f"x_fetch_error: {exc}"
-        print(f"[{target_user}] Fetch failed: {exc}")
+        print(f"[sync] Fetch failed: {exc}")
         save_state(state)
         return
 
@@ -272,7 +317,7 @@ def main() -> None:
             continue
         new_posts.append(p)
 
-    print(f"[{target_user}] Found {len(new_posts)} new media post(s).")
+    print(f"[sync] Found {len(new_posts)} new media post(s).")
 
     for post in new_posts:
         tid = post["tweet_id"]
@@ -282,7 +327,6 @@ def main() -> None:
             if not published:
                 state["pending_drafts"].append({
                     "tweet_id": tid,
-                    "source_user": target_user,
                     "caption": post["caption"],
                     "media_count": len(files),
                     "reason": detail,
@@ -301,11 +345,11 @@ def main() -> None:
         except Exception as exc:
             state["pending_drafts"].append({
                 "tweet_id": tid,
-                "source_user": target_user,
                 "caption": post["caption"],
                 "reason": f"processing_error: {exc}",
                 "queued_at": datetime.now(timezone.utc).isoformat(),
             })
+            state["pending_drafts"] = state["pending_drafts"][-50:]
             print(f"[{tid}] Error -> queued in pending_drafts: {exc}")
 
     state["last_status"] = "completed"

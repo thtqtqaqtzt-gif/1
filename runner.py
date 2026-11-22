@@ -12,16 +12,18 @@ MEDIA_DIR = Path("media_queue")
 X_GRAPHQL_USER_BY_NAME_URL = (
     "https://x.com/i/api/graphql/G3KGOASz96M-Qu0nwmGIOg/UserByScreenName"
 )
-X_GRAPHQL_TWEETS_URL = (
-    "https://x.com/i/api/graphql/E3opETHurmVJflFsUBVuAG/UserTweets"
-)
+X_USER_TWEETS_QUERY_IDS = [
+    "E3opETHurmVJflFsUBVuAG",
+    "V1ze5qBHGlSc7SM5M9-Dqg",
+    "9LYM8v9_3xI4f0A2r7H6Gg",
+    "Q6a1d4M6t9L8k2J5h7G3fA",
+]
 X_BEARER_TOKEN = (
     "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs"
     "%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 )
-# يمكنك وضع المعرف الرقمي مباشرة هنا لأي حساب إذا أردت تجاوز البحث عنه:
-# مثال: "has7n_kw": "1234567890"
 X_USER_ID_MAP: dict[str, str] = {"has7n_kw": "1904353351455686659"}
+
 
 def load_state() -> dict[str, Any]:
     if not STATE_FILE.exists():
@@ -207,9 +209,7 @@ def extract_media_from_tweet(tweet_result: dict[str, Any]) -> tuple[str | None, 
     return tweet_id, clean_text, media_items
 
 
-def fetch_media_posts(session: requests.Session, username: str) -> list[dict[str, Any]]:
-    user_id = resolve_user_id(session, username)
-
+def _request_user_tweets_payload(session: requests.Session, user_id: str) -> dict[str, Any]:
     variables = {
         "userId": user_id,
         "count": 20,
@@ -241,16 +241,34 @@ def fetch_media_posts(session: requests.Session, username: str) -> list[dict[str
         "responsive_web_enhance_cards_enabled": False,
     }
 
-    resp = session.get(
-        X_GRAPHQL_TWEETS_URL,
-        params={
-            "variables": json.dumps(variables, separators=(",", ":")),
-            "features": json.dumps(features, separators=(",", ":")),
-        },
-        timeout=25,
-    )
-    resp.raise_for_status()
-    payload = resp.json()
+    last_404_error: Exception | None = None
+    for qid in X_USER_TWEETS_QUERY_IDS:
+        url = f"https://x.com/i/api/graphql/{qid}/UserTweets"
+        try:
+            resp = session.get(
+                url,
+                params={
+                    "variables": json.dumps(variables, separators=(",", ":")),
+                    "features": json.dumps(features, separators=(",", ":")),
+                },
+                timeout=25,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                last_404_error = exc
+                continue
+            raise
+
+    if last_404_error is not None:
+        raise last_404_error
+    raise RuntimeError("No UserTweets query ID succeeded.")
+
+
+def fetch_media_posts(session: requests.Session, username: str) -> list[dict[str, Any]]:
+    user_id = resolve_user_id(session, username)
+    payload = _request_user_tweets_payload(session, user_id)
 
     instructions = (
         payload.get("data", {})

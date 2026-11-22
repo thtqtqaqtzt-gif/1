@@ -21,8 +21,7 @@ X_BEARER_TOKEN = (
 )
 # يمكنك وضع المعرف الرقمي مباشرة هنا لأي حساب إذا أردت تجاوز البحث عنه:
 # مثال: "has7n_kw": "1234567890"
-X_USER_ID_MAP: dict[str, str] = {}
-
+X_USER_ID_MAP: dict[str, str] = {"has7n_kw": "1904353351455686659"}
 
 def load_state() -> dict[str, Any]:
     if not STATE_FILE.exists():
